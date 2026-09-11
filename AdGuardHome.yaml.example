@@ -1,0 +1,22 @@
+# Used only by Nginx on the same server.  Never expose port 3001 publicly.
+http:
+  address: 127.0.0.1:3001
+  doh:
+    routes:
+      - GET /dns-query
+      - POST /dns-query
+    insecure_enabled: true
+
+dns:
+  bind_hosts:
+    - 127.0.0.1
+  port: 53
+  upstream_dns:
+    - https://dns.cloudflare.com/dns-query
+    - https://dns.quad9.net/dns-query
+  bootstrap_dns:
+    - 1.1.1.1
+    - 9.9.9.9
+
+tls:
+  enabled: false
