@@ -216,6 +216,22 @@ Choose `2`, `3`, or `4`.  Revocation regenerates the CRL and reloads Nginx immed
 router loses DoH access; remove its local certificate and key separately if
 the router is still under your control.
 
+## Renewing a router certificate
+
+Router client certificates are valid for **825 days**. They are issued by the
+private mTLS CA, not by Let’s Encrypt, and are therefore not renewed
+automatically. The public Nginx certificate is renewed automatically by
+Certbot; this is separate from router certificates.
+
+To renew without DNS downtime:
+
+1. Issue a new certificate under a new name, such as `openwrt-home-2028`.
+2. Copy its `client.crt` and `client.key` to the router over the existing
+   files, preserving permissions `644` and `600` respectively.
+3. Reload Forkop and verify that the router resolves DNS through the DoH
+   endpoint.
+4. Revoke the old client certificate through server menu item `3`.
+
 ## Updating Forkop
 
 Forkop updates may replace `dns.uc`.  If that happens, run
