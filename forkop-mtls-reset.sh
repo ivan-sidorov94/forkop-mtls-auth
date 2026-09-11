@@ -6,10 +6,6 @@ set -eu
 target=/usr/lib/forkop/singbox/dns.uc
 backup=
 
-package_version() {
-    opkg status forkop 2>/dev/null | awk '$1 == "Version:" { print $2; exit }'
-}
-
 die() {
     echo "ERROR: $*" >&2
     exit 1
@@ -23,11 +19,9 @@ is_unpatched() {
 [ -f "$target" ] || die "not found: $target"
 command -v ucode >/dev/null 2>&1 || die "ucode is not installed"
 command -v uci >/dev/null 2>&1 || die "uci is not installed"
-version=$(package_version)
-[ -n "$version" ] || die "Forkop package version not found"
 
 for candidate in "$target.mtls.bak" "$target.bak"; do
-    if [ -f "$candidate" ] && [ "$(cat "$candidate.version" 2>/dev/null || true)" = "$version" ] && is_unpatched "$candidate" && ucode -c "$candidate" >/dev/null 2>&1; then
+    if [ -f "$candidate" ] && is_unpatched "$candidate" && ucode -c "$candidate" >/dev/null 2>&1; then
         backup=$candidate
         break
     fi

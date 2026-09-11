@@ -179,7 +179,7 @@ Client private-key path: /etc/forkop/dns/client.key
 ```
 
 The router script applies the required Forkop `dns.uc` change, creates a
-Forkop-version-bound backup at `/usr/lib/forkop/singbox/dns.uc.mtls.bak`, writes the Forkop UCI
+backup at `/usr/lib/forkop/singbox/dns.uc.mtls.bak`, writes the Forkop UCI
 settings, and reloads Forkop.  It adds the new mTLS endpoint first, then keeps
 all existing main DNS entries after it in their original order.  Forkop uses one DNS protocol for the whole list:
 the existing `dns_type` must already be `doh`, otherwise the script stops
@@ -251,8 +251,7 @@ chmod 700 /root/forkop-mtls-reset.sh
 /root/forkop-mtls-reset.sh
 ```
 
-It restores an unpatched `dns.uc` only if its saved Forkop package version
-matches the installed one, removes the mTLS UCI fields and patch files, then
-reloads Forkop. It leaves client certificate files in place because their paths
-are user-selected. It stops without changing anything if no compatible backup
+It restores an unpatched `dns.uc`, removes the mTLS UCI fields and patch files,
+then reloads Forkop. It leaves client certificate files in place because their
+paths are user-selected. It stops without changing anything if no valid backup
 is present.

@@ -6,10 +6,6 @@ set -eu
 target=/usr/lib/forkop/singbox/dns.uc
 backup=${target}.mtls.bak
 
-package_version() {
-    opkg status forkop 2>/dev/null | awk '$1 == "Version:" { print $2; exit }'
-}
-
 die() {
     echo "ERROR: $*" >&2
     exit 1
@@ -28,8 +24,6 @@ ask() {
 command -v awk >/dev/null 2>&1 || die "awk is not installed"
 command -v ucode >/dev/null 2>&1 || die "ucode is not installed"
 command -v uci >/dev/null 2>&1 || die "uci is not installed"
-version=$(package_version)
-[ -n "$version" ] || die "Forkop package version not found"
 
 echo "Forkop DoH mTLS setup"
 domain=$(ask "DNS domain (for example dns.example.net): ")
@@ -129,14 +123,7 @@ END {
         die "generated dns.uc failed the ucode syntax check; nothing changed"
     fi
 
-    if [ -e "$backup" ] && [ "$(cat "$backup.version" 2>/dev/null || true)" != "$version" ]; then
-        mv "$backup" "$backup.old"
-        rm -f "$backup.version"
-    fi
-    if [ ! -e "$backup" ]; then
-        cp -p "$target" "$backup"
-        printf '%s\n' "$version" >"$backup.version"
-    fi
+    [ -e "$backup" ] || cp -p "$target" "$backup"
     chmod 644 "$new_file"
     mv "$new_file" "$target"
     trap - EXIT HUP INT TERM
