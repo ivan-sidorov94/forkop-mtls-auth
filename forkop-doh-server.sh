@@ -92,8 +92,33 @@ sync_ca() {
     install -m 644 "$pki/crl/ca.crl.pem" "$nginx_mtls/forkop-client-ca.crl.pem"
 }
 
+install_crl_timer() {
+    cat >/etc/systemd/system/forkop-doh-crl.service <<EOF
+[Unit]
+Description=Refresh Forkop DoH client certificate revocation list
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/openssl ca -config $pki/openssl.cnf -gencrl -out $pki/crl/ca.crl.pem
+ExecStart=/usr/bin/install -m 644 $pki/crl/ca.crl.pem $nginx_mtls/forkop-client-ca.crl.pem
+ExecStart=/usr/sbin/nginx -t
+ExecStart=/usr/bin/systemctl reload nginx
+EOF
+    cat >/etc/systemd/system/forkop-doh-crl.timer <<'EOF'
+[Unit]
+Description=Daily Forkop DoH CRL refresh
+[Timer]
+OnCalendar=daily
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+    systemctl daemon-reload
+    systemctl enable --now forkop-doh-crl.timer
+}
+
 write_nginx_config() {
-    local stub_root="/var/www/$DOMAIN"
+    local stub_root="/var/www/$DOMAIN" previous=
+    [ "$DOH_PATH" != /dns-query ] || die "/dns-query is reserved; choose a secret path such as /api/v1/router-doh"
     install -d -m 755 "$stub_root"
     if [ ! -e "$stub_root/index.html" ] || \
        grep -qE '<title>Service available</title>|<!-- Forkop stub -->' "$stub_root/index.html"; then
@@ -150,10 +175,12 @@ EOF
         chmod 644 "$stub_root/index.html"
     fi
 
-    cat >"$nginx_site" <<EOF
+    if [ ! -s "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
+        cat >"$nginx_site" <<EOF
 server {
     listen 80;
     server_name $DOMAIN;
+    server_tokens off;
     location ^~ /.well-known/acme-challenge/ { root /var/www/acme; }
     location / {
         root $stub_root;
@@ -162,18 +189,25 @@ server {
     }
 }
 EOF
-    ln -sfn "$nginx_site" "/etc/nginx/sites-enabled/$DOMAIN.conf"
-    install -d -m 755 /var/www/acme
-    nginx -t
-    systemctl reload nginx
+        ln -sfn "$nginx_site" "/etc/nginx/sites-enabled/$DOMAIN.conf"
+        install -d -m 755 /var/www/acme
+        nginx -t
+        systemctl reload nginx
+    fi
 
     certbot certonly --webroot -w /var/www/acme -d "$DOMAIN" \
         --email "$EMAIL" --agree-tos --non-interactive --keep-until-expiring
+
+    if [ -e "$nginx_site" ]; then
+        previous=$(mktemp)
+        cp -p "$nginx_site" "$previous"
+    fi
 
     cat >"$nginx_site" <<EOF
 server {
     listen 80;
     server_name $DOMAIN;
+    server_tokens off;
     location ^~ /.well-known/acme-challenge/ { root /var/www/acme; }
     location / { return 301 https://\$host\$request_uri; }
 }
@@ -181,6 +215,7 @@ server {
 server {
     listen 443 ssl http2;
     server_name $DOMAIN;
+    server_tokens off;
 
     client_max_body_size 10m;
 
@@ -194,17 +229,27 @@ server {
     ssl_verify_client optional;
     ssl_verify_depth 1;
 
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+
+    location ~ /\.(?!well-known) { return 404; }
+
     location = /dns-query { return 444; }
 
     location = $DOH_PATH {
         if (\$ssl_client_verify != SUCCESS) { return 403; }
+
+        limit_except GET POST { deny all; }
 
         proxy_pass http://127.0.0.1:3001/dns-query;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For \$remote_addr;
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_buffering off;
     }
@@ -222,7 +267,12 @@ EOF
 systemctl reload nginx
 EOF
     chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
-    nginx -t
+    if ! nginx -t; then
+        [ -z "$previous" ] || cp -p "$previous" "$nginx_site"
+        [ -z "$previous" ] || rm -f "$previous"
+        die "generated Nginx configuration is invalid; the running configuration was not reloaded"
+    fi
+    [ -z "$previous" ] || rm -f "$previous"
     systemctl reload nginx
 }
 
@@ -234,6 +284,7 @@ complete_setup() {
     done
     write_adguard_config
     sync_ca
+    install_crl_timer
     write_nginx_config
     systemctl enable --now certbot.timer 2>/dev/null || true
     : >"$setup_complete"
@@ -262,6 +313,7 @@ setup() {
     nginx_site="/etc/nginx/sites-available/$DOMAIN.conf"
     read -rp 'DoH path (for example /api/v1/my-secret): ' DOH_PATH
     [[ $DOH_PATH =~ ^/[A-Za-z0-9._~/-]+$ ]] || die "invalid DoH path"
+    [ "$DOH_PATH" != /dns-query ] || die "/dns-query is reserved; choose a secret path such as /api/v1/router-doh"
     read -rp 'Email for Let\x27s Encrypt: ' EMAIL
     [[ $EMAIL =~ ^[A-Za-z0-9._%+@-]+$ && $EMAIL == *'@'* ]] || die "invalid email"
 
@@ -332,6 +384,7 @@ update_nginx() {
     [ -f "$pki/ca.crt" ] || die "CA not found; complete setup first"
     [ -f "$pki/crl/ca.crl.pem" ] || die "CRL not found; complete setup first"
     sync_ca
+    install_crl_timer
     write_nginx_config
     echo "Nginx site and stub page updated."
 }

@@ -6,6 +6,10 @@ set -eu
 target=/usr/lib/forkop/singbox/dns.uc
 backup=${target}.mtls.bak
 
+package_version() {
+    opkg status forkop 2>/dev/null | awk '$1 == "Version:" { print $2; exit }'
+}
+
 die() {
     echo "ERROR: $*" >&2
     exit 1
@@ -24,6 +28,8 @@ ask() {
 command -v awk >/dev/null 2>&1 || die "awk is not installed"
 command -v ucode >/dev/null 2>&1 || die "ucode is not installed"
 command -v uci >/dev/null 2>&1 || die "uci is not installed"
+version=$(package_version)
+[ -n "$version" ] || die "Forkop package version not found"
 
 echo "Forkop DoH mTLS setup"
 domain=$(ask "DNS domain (for example dns.example.net): ")
@@ -31,12 +37,13 @@ case "$domain" in
     ''|*[!A-Za-z0-9.-]*) die "invalid DNS domain" ;;
 esac
 
-doh_path=$(ask "DoH path [/dns-query]: ")
-doh_path=${doh_path:-/dns-query}
+doh_path=$(ask "DoH path [/api/v1/router-doh]: ")
+doh_path=${doh_path:-/api/v1/router-doh}
 case "$doh_path" in
     /*) ;;
     *) die "DoH path must start with /" ;;
 esac
+[ "$doh_path" != /dns-query ] || die "/dns-query is reserved; enter the secret path configured on the server"
 
 client_certificate=$(ask "Client certificate path: ")
 client_key=$(ask "Client private-key path: ")
@@ -122,7 +129,14 @@ END {
         die "generated dns.uc failed the ucode syntax check; nothing changed"
     fi
 
-    [ -e "$backup" ] || cp -p "$target" "$backup"
+    if [ -e "$backup" ] && [ "$(cat "$backup.version" 2>/dev/null || true)" != "$version" ]; then
+        mv "$backup" "$backup.old"
+        rm -f "$backup.version"
+    fi
+    if [ ! -e "$backup" ]; then
+        cp -p "$target" "$backup"
+        printf '%s\n' "$version" >"$backup.version"
+    fi
     chmod 644 "$new_file"
     mv "$new_file" "$target"
     trap - EXIT HUP INT TERM

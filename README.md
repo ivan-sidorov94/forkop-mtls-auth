@@ -116,14 +116,16 @@ mTLS is.  The script creates:
 /etc/forkop-doh/clients/             # issued router credentials
 ```
 
-It also enables Certbot’s timer and an Nginx reload hook.  Let’s Encrypt
-renewals therefore require that port 80 and the domain’s DNS record remain
-available.
+It also enables Certbot’s timer and an Nginx reload hook. A separate systemd
+timer refreshes the mTLS CRL daily and reloads Nginx after validation. Let’s
+Encrypt renewals therefore require that port 80 and the domain’s DNS record
+remain available.
 
 Opening the domain in a browser shows a static ShareFlow stub page.  It is
 saved as `/var/www/DOMAIN/index.html`; it has no file-upload backend.
 For an already configured server, choose menu item `5` to create or update the
-Nginx site and stub page.
+Nginx site and stub page. It keeps the current HTTPS configuration in place
+while Certbot runs and reloads only a configuration that passes `nginx -t`.
 
 AdGuard Home is intentionally available only at `127.0.0.1:3001`.  To open
 its local dashboard from an administrator computer, create an SSH tunnel:
@@ -176,8 +178,8 @@ Client certificate path: /etc/forkop/dns/client.crt
 Client private-key path: /etc/forkop/dns/client.key
 ```
 
-The router script applies the required Forkop `dns.uc` change, creates one
-backup at `/usr/lib/forkop/singbox/dns.uc.mtls.bak`, writes the Forkop UCI
+The router script applies the required Forkop `dns.uc` change, creates a
+Forkop-version-bound backup at `/usr/lib/forkop/singbox/dns.uc.mtls.bak`, writes the Forkop UCI
 settings, and reloads Forkop.  It adds the new mTLS endpoint first, then keeps
 all existing main DNS entries after it in their original order.  Forkop uses one DNS protocol for the whole list:
 the existing `dns_type` must already be `doh`, otherwise the script stops
@@ -212,9 +214,10 @@ paths in its TLS section.
 ./forkop-doh-server.sh
 ```
 
-Choose `2`, `3`, or `4`.  Revocation regenerates the CRL and reloads Nginx immediately.  The revoked
-router loses DoH access; remove its local certificate and key separately if
-the router is still under your control.
+Choose `2`, `3`, or `4`. Revocation regenerates the CRL and reloads Nginx
+immediately; the daily timer keeps an unchanged CRL valid. The revoked router
+loses DoH access; remove its local certificate and key separately if the router
+is still under your control.
 
 ## Renewing a router certificate
 
@@ -248,7 +251,8 @@ chmod 700 /root/forkop-mtls-reset.sh
 /root/forkop-mtls-reset.sh
 ```
 
-It restores an unpatched `dns.uc` from either `dns.uc.mtls.bak` or `dns.uc.bak`,
-removes only the mTLS UCI fields, credentials, patch-recovery service, and
-patch files, then reloads Forkop.  It stops without changing anything if a
-valid unpatched backup is not present.
+It restores an unpatched `dns.uc` only if its saved Forkop package version
+matches the installed one, removes the mTLS UCI fields and patch files, then
+reloads Forkop. It leaves client certificate files in place because their paths
+are user-selected. It stops without changing anything if no compatible backup
+is present.
